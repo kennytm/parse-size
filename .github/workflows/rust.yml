@@ -1,0 +1,22 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v2
+      - name: Clippy
+        run: cargo clippy
+      - name: Format
+        run: cargo fmt -- --check
+      - name: Test
+        run: cargo test
