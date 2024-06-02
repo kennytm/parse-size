@@ -15,8 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Clippy
-        run: cargo clippy
+        run: cargo clippy -- -W clippy::pedantic
       - name: Format
         run: cargo fmt -- --check
       - name: Test
         run: cargo test
+      - name: Test with all features
+        run: cargo test --all-features

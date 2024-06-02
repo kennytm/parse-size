@@ -75,25 +75,28 @@
 //!
 //! # Integration examples
 //!
-//! Use with `structopt` v0.3:
+//! Use with `clap` v4:
 //!
-//! ```rust,ignore
-//! use structopt::StructOpt;
+// Trick from https://github.com/rust-lang/rust/issues/93083
+#![cfg_attr(feature = "std", doc = "```rust")]
+#![cfg_attr(not(feature = "std"), doc = "```rust,ignore")]
+//! use clap::Parser;
 //! use parse_size::parse_size;
 //!
-//! #[derive(StructOpt)]
+//! #[derive(Parser)]
 //! pub struct Opt {
-//!     #[structopt(long, parse(try_from_str = parse_size))]
+//      // FIXME: we need a closure because of https://github.com/clap-rs/clap/issues/4939
+//!     #[arg(long, value_parser = |s: &str| parse_size(s))]
 //!     pub size: u64,
 //! }
 //!
-//! let opt = Opt::from_iter(&["./app", "--size", "2.5 K"]);
+//! let opt = Opt::parse_from(&["./app", "--size", "2.5 K"]);
 //! assert_eq!(opt.size, 2500);
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use core::{convert::TryFrom, fmt};
+use core::{convert::TryFrom, fmt, num::IntErrorKind};
 
 /// The system to use when parsing prefixes like "KB" and "GB".
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -113,18 +116,18 @@ impl UnitSystem {
     /// Y exceed the `u64` range and thus considered invalid.
     fn factor(self, prefix: u8) -> Option<u64> {
         Some(match (self, prefix) {
-            (Self::Decimal, b'k') | (Self::Decimal, b'K') => 1_000,
-            (Self::Decimal, b'm') | (Self::Decimal, b'M') => 1_000_000,
-            (Self::Decimal, b'g') | (Self::Decimal, b'G') => 1_000_000_000,
-            (Self::Decimal, b't') | (Self::Decimal, b'T') => 1_000_000_000_000,
-            (Self::Decimal, b'p') | (Self::Decimal, b'P') => 1_000_000_000_000_000,
-            (Self::Decimal, b'e') | (Self::Decimal, b'E') => 1_000_000_000_000_000_000,
-            (Self::Binary, b'k') | (Self::Binary, b'K') => 1_u64 << 10,
-            (Self::Binary, b'm') | (Self::Binary, b'M') => 1_u64 << 20,
-            (Self::Binary, b'g') | (Self::Binary, b'G') => 1_u64 << 30,
-            (Self::Binary, b't') | (Self::Binary, b'T') => 1_u64 << 40,
-            (Self::Binary, b'p') | (Self::Binary, b'P') => 1_u64 << 50,
-            (Self::Binary, b'e') | (Self::Binary, b'E') => 1_u64 << 60,
+            (Self::Decimal, b'k' | b'K') => 1_000,
+            (Self::Decimal, b'm' | b'M') => 1_000_000,
+            (Self::Decimal, b'g' | b'G') => 1_000_000_000,
+            (Self::Decimal, b't' | b'T') => 1_000_000_000_000,
+            (Self::Decimal, b'p' | b'P') => 1_000_000_000_000_000,
+            (Self::Decimal, b'e' | b'E') => 1_000_000_000_000_000_000,
+            (Self::Binary, b'k' | b'K') => 1_u64 << 10,
+            (Self::Binary, b'm' | b'M') => 1_u64 << 20,
+            (Self::Binary, b'g' | b'G') => 1_u64 << 30,
+            (Self::Binary, b't' | b'T') => 1_u64 << 40,
+            (Self::Binary, b'p' | b'P') => 1_u64 << 50,
+            (Self::Binary, b'e' | b'E') => 1_u64 << 60,
             _ => return None,
         })
     }
@@ -153,6 +156,7 @@ pub struct Config {
 
 impl Config {
     /// Creates a new parser configuration.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             unit_system: UnitSystem::Decimal,
@@ -164,6 +168,7 @@ impl Config {
     /// Changes the configuration's unit system.
     ///
     /// The default system is decimal (powers of 1000).
+    #[must_use]
     pub const fn with_unit_system(mut self, unit_system: UnitSystem) -> Self {
         self.unit_system = unit_system;
         self
@@ -183,6 +188,7 @@ impl Config {
     /// assert_eq!(cfg.parse_size("1 MB"), Ok(1048576));
     /// assert_eq!(cfg.parse_size("1 MiB"), Ok(1048576));
     /// ```
+    #[must_use]
     pub const fn with_binary(self) -> Self {
         self.with_unit_system(UnitSystem::Binary)
     }
@@ -201,6 +207,7 @@ impl Config {
     /// assert_eq!(cfg.parse_size("1 MB"), Ok(1000000));
     /// assert_eq!(cfg.parse_size("1 MiB"), Ok(1048576));
     /// ```
+    #[must_use]
     pub const fn with_decimal(self) -> Self {
         self.with_unit_system(UnitSystem::Decimal)
     }
@@ -225,6 +232,7 @@ impl Config {
     /// assert_eq!(cfg.parse_size("128 B"), Ok(128)); // explicit units overrides the default
     /// assert_eq!(cfg.parse_size("16 KiB"), Ok(16384));
     /// ```
+    #[must_use]
     pub const fn with_default_factor(mut self, factor: u64) -> Self {
         self.default_factor = factor;
         self
@@ -262,6 +270,7 @@ impl Config {
     /// assert_eq!(cfg.parse_size("123B"), Ok(123));
     /// assert_eq!(cfg.parse_size("123KB"), Ok(123000));
     /// ```
+    #[must_use]
     pub const fn with_byte_suffix(mut self, byte_suffix: ByteSuffix) -> Self {
         self.byte_suffix = byte_suffix;
         self
@@ -279,8 +288,13 @@ impl Config {
     /// assert_eq!(cfg.parse_size("20000"), Ok(20000));
     /// assert_eq!(cfg.parse_size("^_^"), Err(Error::InvalidDigit));
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if the input has invalid digits or the result
+    /// exceeded 2<sup>64</sup>−1.
     pub fn parse_size<T: AsRef<[u8]>>(&self, src: T) -> Result<u64, Error> {
-        parse_size_inner(self, src.as_ref())
+        self.parse_size_inner(src.as_ref())
     }
 }
 
@@ -290,7 +304,6 @@ impl Default for Config {
     }
 }
 
-// TODO: Switch to IntErrorKind once it is stable.
 /// The error returned when parse failed.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[non_exhaustive]
@@ -313,8 +326,25 @@ impl fmt::Display for Error {
     }
 }
 
+/// The error type implements [`std::error::Error`] when the `std` feature is
+/// enabled.
+///
+/// When the [Rust unstable feature `error_in_core`][rust#103765] is stabilized,
+/// the `std` feature will no longer be required.
+///
+/// [rust#103765]: https://github.com/rust-lang/rust/issues/103765
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
+
+impl From<Error> for IntErrorKind {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::Empty => Self::Empty,
+            Error::InvalidDigit => Self::InvalidDigit,
+            Error::PosOverflow => Self::PosOverflow,
+        }
+    }
+}
 
 /// Parses the string input into the number of bytes it represents using the
 /// default configuration.
@@ -332,45 +362,51 @@ impl std::error::Error for Error {}
 /// assert_eq!(parse_size("0.2 MiB"), Ok(209715));
 /// assert_eq!(parse_size("^_^"), Err(Error::InvalidDigit));
 /// ```
+///
+/// # Errors
+///
+/// Returns an [`Error`] if the input has invalid digits or the result exceeded
+/// 2<sup>64</sup>−1.
 pub fn parse_size<T: AsRef<[u8]>>(src: T) -> Result<u64, Error> {
-    parse_size_inner(&Config::new(), src.as_ref())
+    Config::new().parse_size(src)
 }
 
-fn parse_size_inner(cfg: &Config, mut src: &[u8]) -> Result<u64, Error> {
-    // if it ends with 'B' the default factor is always 1.
-    let mut multiply = cfg.default_factor;
-    match src {
-        [init @ .., b'b'] | [init @ .., b'B'] => {
-            if cfg.byte_suffix == ByteSuffix::Deny {
+impl Config {
+    fn parse_size_inner(&self, mut src: &[u8]) -> Result<u64, Error> {
+        // if it ends with 'B' the default factor is always 1.
+        let mut multiply = if let [init @ .., b'b' | b'B'] = src {
+            if self.byte_suffix == ByteSuffix::Deny {
                 return Err(Error::InvalidDigit);
             }
             src = init;
-            multiply = 1;
-        }
-        _ => {
-            if cfg.byte_suffix == ByteSuffix::Require {
+            1
+        } else {
+            if self.byte_suffix == ByteSuffix::Require {
                 return Err(Error::InvalidDigit);
             }
-        }
-    }
+            self.default_factor
+        };
 
-    // if it ends with an 'i' we always use binary prefix.
-    let mut unit_system = cfg.unit_system;
-    match src {
-        [init @ .., b'i'] | [init @ .., b'I'] => {
+        // if it ends with an 'i' we always use binary prefix.
+        let unit_system = if let [init @ .., b'i' | b'I'] = src {
             src = init;
-            unit_system = UnitSystem::Binary;
-        }
-        _ => {}
-    }
+            UnitSystem::Binary
+        } else {
+            self.unit_system
+        };
 
-    if let [init @ .., prefix] = src {
-        if let Some(f) = unit_system.factor(*prefix) {
-            multiply = f;
-            src = init;
+        if let [init @ .., prefix] = src {
+            if let Some(f) = unit_system.factor(*prefix) {
+                multiply = f;
+                src = init;
+            }
         }
-    }
 
+        parse_size_with_multiple(src, multiply)
+    }
+}
+
+fn parse_size_with_multiple(src: &[u8], multiply: u64) -> Result<u64, Error> {
     #[derive(Copy, Clone, PartialEq)]
     enum Ps {
         Empty,
@@ -397,7 +433,7 @@ fn parse_size_inner(cfg: &Config, mut src: &[u8]) -> Result<u64, Error> {
 
     for b in src {
         match (state, *b) {
-            (Ps::Integer, b'0'..=b'9') | (Ps::Empty, b'0'..=b'9') => {
+            (Ps::Integer | Ps::Empty, b'0'..=b'9') => {
                 if let Some(m) = append_digit!(mantissa, checked_add, *b) {
                     mantissa = m;
                     state = Ps::Integer;
@@ -423,7 +459,6 @@ fn parse_size_inner(cfg: &Config, mut src: &[u8]) -> Result<u64, Error> {
                     state = Ps::FractionOverflow;
                 }
             }
-            (Ps::FractionOverflow, b'0'..=b'9') => {}
             (Ps::PosExponent, b'0'..=b'9') => {
                 if let Some(e) = append_digit!(exponent, checked_add, *b) {
                     exponent = e;
@@ -437,15 +472,11 @@ fn parse_size_inner(cfg: &Config, mut src: &[u8]) -> Result<u64, Error> {
                 }
             }
 
-            (_, b'_') | (_, b' ') | (Ps::PosExponent, b'+') => {}
-            (Ps::Integer, b'e')
-            | (Ps::Integer, b'E')
-            | (Ps::Fraction, b'e')
-            | (Ps::Fraction, b'E')
-            | (Ps::IntegerOverflow, b'e')
-            | (Ps::IntegerOverflow, b'E')
-            | (Ps::FractionOverflow, b'e')
-            | (Ps::FractionOverflow, b'E') => state = Ps::PosExponent,
+            (_, b'_' | b' ') | (Ps::PosExponent, b'+') | (Ps::FractionOverflow, b'0'..=b'9') => {}
+            (
+                Ps::Integer | Ps::Fraction | Ps::IntegerOverflow | Ps::FractionOverflow,
+                b'e' | b'E',
+            ) => state = Ps::PosExponent,
             (Ps::PosExponent, b'-') => state = Ps::NegExponent,
             (Ps::Integer, b'.') => state = Ps::Fraction,
             (Ps::IntegerOverflow, b'.') => state = Ps::FractionOverflow,
@@ -458,14 +489,13 @@ fn parse_size_inner(cfg: &Config, mut src: &[u8]) -> Result<u64, Error> {
     }
 
     let exponent = exponent.saturating_add(fractional_exponent);
+    let abs_exponent = exponent.unsigned_abs();
     if exponent >= 0 {
-        let power = 10_u64
-            .checked_pow(exponent as u32)
-            .ok_or(Error::PosOverflow)?;
+        let power = 10_u64.checked_pow(abs_exponent).ok_or(Error::PosOverflow)?;
         let multiply = multiply.checked_mul(power).ok_or(Error::PosOverflow)?;
         mantissa.checked_mul(multiply).ok_or(Error::PosOverflow)
     } else if exponent >= -38 {
-        let power = 10_u128.pow(-exponent as u32);
+        let power = 10_u128.pow(abs_exponent);
         let result = (u128::from(mantissa) * u128::from(multiply) + power / 2) / power;
         u64::try_from(result).map_err(|_| Error::PosOverflow)
     } else {
@@ -592,8 +622,40 @@ fn test_parse_errors() {
 #[test]
 fn test_config() {
     let cfg = Config::new().with_binary().with_default_factor(1_048_576);
-
     assert_eq!(cfg.parse_size("3.5"), Ok(3_670_016));
     assert_eq!(cfg.parse_size("35 B"), Ok(35));
     assert_eq!(cfg.parse_size("5K"), Ok(5120));
+    assert_eq!(cfg.parse_size("1.7e13"), Ok(17_825_792_000_000_000_000));
+    assert_eq!(cfg.parse_size("1.8e13"), Err(Error::PosOverflow));
+    assert_eq!(cfg.parse_size("1.8e18"), Err(Error::PosOverflow));
+
+    let cfg = Config::new()
+        .with_decimal()
+        .with_byte_suffix(ByteSuffix::Require);
+    assert_eq!(cfg.parse_size("3.5MB"), Ok(3_500_000));
+    assert_eq!(cfg.parse_size("2.5KiB"), Ok(2560));
+    assert_eq!(cfg.parse_size("7"), Err(Error::InvalidDigit));
+    assert_eq!(cfg.parse_size("9b"), Ok(9));
+
+    let cfg = Config::default().with_byte_suffix(ByteSuffix::Deny);
+    assert_eq!(cfg.parse_size("3.5MB"), Err(Error::InvalidDigit));
+    assert_eq!(cfg.parse_size("3.5M"), Ok(3_500_000));
+    assert_eq!(cfg.parse_size("7b"), Err(Error::InvalidDigit));
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn test_int_error_kind() {
+    let test_cases = [
+        (Error::Empty, ""),
+        (Error::InvalidDigit, "?"),
+        (Error::PosOverflow, "99999999999999999999"),
+    ];
+    for (expected_error, parse_from) in test_cases {
+        let std_error = parse_from.parse::<u64>().unwrap_err();
+        let local_error = parse_size(parse_from).unwrap_err();
+        assert_eq!(local_error, expected_error);
+        assert_eq!(local_error.to_string(), std_error.to_string());
+        assert_eq!(&IntErrorKind::from(local_error), std_error.kind());
+    }
 }

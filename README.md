@@ -21,7 +21,7 @@ assert_eq!(parse_size("14.2e+8"), Ok(14_2000_0000));
 * Supports both binary and decimal based prefix up to exabytes.
 * Numbers can be fractional and/or in scientific notation. `parse-size` can accurately parse the input using the full 64-bit precision.
 * The unit is case-insensitive. The "B" suffix is also optional (`1 KiB` = `1 kib` = `1Ki`).
-* Fractional bytes are allowed, and rounded to nearest integer (`2.5B` = `3`).
+* Fractional bytes are allowed, and rounded to nearest integer (`2.5 KiB` = `2560`, `2.5B` = `3`).
 * Underscores and spaces in the numbers are ignored to support digit grouping (`123_456` = `123456`).
 * Conventional units (KB, GB, ...) can be configured to use the binary system.
 * `#![no_std]`-capable, no dependencies, and uses no heap allocation.
