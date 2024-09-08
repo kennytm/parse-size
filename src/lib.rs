@@ -77,9 +77,7 @@
 //!
 //! Use with `clap` v4:
 //!
-// Trick from https://github.com/rust-lang/rust/issues/93083
-#![cfg_attr(feature = "std", doc = "```rust")]
-#![cfg_attr(not(feature = "std"), doc = "```rust,ignore")]
+//! ```rust
 //! use clap::Parser;
 //! use parse_size::parse_size;
 //!
@@ -94,7 +92,7 @@
 //! assert_eq!(opt.size, 2500);
 //! ```
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 
 use core::{convert::TryFrom, fmt, num::IntErrorKind};
 
@@ -326,15 +324,7 @@ impl fmt::Display for Error {
     }
 }
 
-/// The error type implements [`std::error::Error`] when the `std` feature is
-/// enabled.
-///
-/// When the [Rust unstable feature `error_in_core`][rust#103765] is stabilized,
-/// the `std` feature will no longer be required.
-///
-/// [rust#103765]: https://github.com/rust-lang/rust/issues/103765
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 impl From<Error> for IntErrorKind {
     fn from(e: Error) -> Self {
@@ -643,9 +633,11 @@ fn test_config() {
     assert_eq!(cfg.parse_size("7b"), Err(Error::InvalidDigit));
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn test_int_error_kind() {
+    extern crate alloc;
+    use alloc::string::ToString as _;
+
     let test_cases = [
         (Error::Empty, ""),
         (Error::InvalidDigit, "?"),
