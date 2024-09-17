@@ -7,15 +7,10 @@ description = "Parse byte size into integer accurately."
 keywords = ["bytes", "size", "humanize", "human", "parser"]
 repository = "https://github.com/kennytm/parse-size"
 license = "MIT"
-rust-version = "1.56.0"
-
-[package.metadata.docs.rs]
-features = ["std"]
+rust-version = "1.81.0"
 
 [features]
-# The `std` feature is provided if you need `parse_size::Error` to implement
-# `std::error::Error`. This feature will become no-op once the Error trait is
-# moved into libcore (https://github.com/rust-lang/rust/issues/53487).
+# This feature has been deprecated and does nothing.
 std = []
 
 [dev-dependencies]
